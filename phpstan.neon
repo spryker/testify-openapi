@@ -1,0 +1,11 @@
+parameters:
+    level: 8
+    checkMissingIterableValueType: false
+
+    bootstrapFiles:
+        - phpstan-bootstrap.php
+
+    ignoreErrors:
+        - '#Method .+OpenApiHelper::getOpenApi\(\) should return#'
+
+    reportUnmatchedIgnoredErrors: false

@@ -1,0 +1,59 @@
+{
+    "name": "spryker-sdk/testify-openapi",
+    "type": "library",
+    "description": "TestifyOpenApi module",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.0",
+        "cebe/php-openapi": "^1.0.0",
+        "league/openapi-psr7-validator": "^0.18.0",
+        "nyholm/psr7": "^1.0.0",
+        "ramsey/uuid": "^4.0.0",
+        "spryker/auth-rest-api": "^2.0.0",
+        "spryker/glue-application": "^1.0.0",
+        "spryker/rest-request-validator": "^1.0.0",
+        "symfony/psr-http-message-bridge": "^2.0.0"
+    },
+    "require-dev": {
+        "codeception/codeception": "^4.0.0",
+        "codeception/module-asserts": "*",
+        "infection/infection": "^0.26.16",
+        "spryker/code-sniffer": "*",
+        "spryker/testify": "*",
+        "symfony/framework-bundle": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "Spryker\\Glue\\TestifyOpenApi\\": "src/Spryker/Glue/TestifyOpenApi/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "SprykerTest\\": "tests/SprykerTest/",
+            "TestifyOpenApi\\Application\\": "tests/_support/Application/"
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "scripts": {
+        "cs-check": "phpcs --colors -p -s --extensions=php --standard=vendor/spryker/code-sniffer/Spryker/ruleset.xml src/Spryker/ tests/",
+        "cs-fix": "phpcbf --colors -p --extensions=php --standard=vendor/spryker/code-sniffer/Spryker/ruleset.xml src/Spryker/ tests/",
+        "stan": "phpstan analyze -l 8 src/Spryker/",
+        "test": "codecept build && codecept run",
+        "test-cover": "codecept build && codecept run --coverage-xml",
+        "rector": "vendor/bin/rector process src/Spryker/ --config architector.php --ansi",
+        "rector-diff": "vendor/bin/rector process src/Spryker/ --config architector.php --ansi --dry-run"
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-master": "1.0.x-dev"
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "dealerdirect/phpcodesniffer-composer-installer": true,
+            "infection/extension-installer": true
+        }
+    }
+}
