@@ -18,6 +18,7 @@
         "codeception/codeception": "^4.0.0",
         "codeception/module-asserts": "*",
         "infection/infection": "^0.26.16",
+        "phpstan/phpstan": "^1.9",
         "spryker/code-sniffer": "*",
         "spryker/testify": "*",
         "symfony/framework-bundle": "*"

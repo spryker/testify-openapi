@@ -68,7 +68,7 @@ class StatisticConsolePrinter
         $output->writeln(sprintf('<fg=green>%s</> of %s were successfully executed', $successfulTests, $totalNumberOfTests));
         $output->writeln(sprintf('<fg=yellow>%s</> tests skipped', $totalNumberOfWarnings));
 
-        if ($statistic->hasFailures()) {
+        if ($statistic->hasFailures() === true) {
             $output->writeln(sprintf('<fg=yellow>%s</> Tests failed', $totalNumberOfFailures));
         }
     }
