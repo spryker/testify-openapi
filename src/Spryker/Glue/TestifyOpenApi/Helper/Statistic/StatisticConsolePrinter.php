@@ -33,7 +33,6 @@ class StatisticConsolePrinter
         $output->writeln('<error>Test(s) failed</error>');
 
         foreach ($statistic->getStatistics() as $path => $methods) {
-
             $table = new Table($output);
 
             $table->setHeaders([
@@ -56,7 +55,6 @@ class StatisticConsolePrinter
                     }
                 }
             }
-
 
             $table->render();
         }
