@@ -15,7 +15,7 @@
         "symfony/psr-http-message-bridge": "^2.0.0"
     },
     "require-dev": {
-        "codeception/codeception": "^4.0.0",
+        "codeception/codeception": "^5.0.2",
         "codeception/module-asserts": "*",
         "infection/infection": "^0.26.16",
         "phpstan/phpstan": "^1.9",

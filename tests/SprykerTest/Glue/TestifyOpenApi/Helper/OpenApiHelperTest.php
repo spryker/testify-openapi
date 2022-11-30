@@ -34,7 +34,7 @@ class OpenApiHelperTest extends Unit
     /**
      * @var \TestifyOpenApi\TestifyOpenApiTester
      */
-    protected TestifyOpenApiTester $tester;
+    public TestifyOpenApiTester $tester;
 
     /**
      * @return void
