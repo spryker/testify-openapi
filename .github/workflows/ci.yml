@@ -67,6 +67,7 @@ jobs:
               run: composer test-cover
 
             - uses: codecov/codecov-action@v3
+              if: ${{ matrix.php-version == '8.1' }}
               with:
                   files: ./tests/_output/coverage.xml
                   fail_ci_if_error: true
