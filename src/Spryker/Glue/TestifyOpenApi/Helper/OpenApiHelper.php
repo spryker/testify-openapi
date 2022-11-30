@@ -598,6 +598,8 @@ class OpenApiHelper extends Module
      * @param string $type
      * @param \Spryker\Glue\TestifyOpenApi\Helper\Hook\AbstractHook|null $hook
      *
+     * @throws \Exception
+     *
      * @return string|int
      */
     protected function resolveValueForParameter(Parameter $parameter, string $path, string $type, ?AbstractHook $hook)
@@ -615,7 +617,7 @@ class OpenApiHelper extends Module
         }
 
         if (!$parameter->schema || !is_a($parameter->schema, Schema::class)) {
-            throw new \Exception(sprintf('Parameter %s doesn\'t have a schema defined. Can\'t get a value for it.', $parameter->name));
+            throw new Exception(sprintf('Parameter %s doesn\'t have a schema defined. Can\'t get a value for it.', $parameter->name));
         }
 
         return $resolvedValue ?? $this->getValueForParameter($parameter->schema, $parameter, $path);
