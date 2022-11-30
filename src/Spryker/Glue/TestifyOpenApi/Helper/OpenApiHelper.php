@@ -166,6 +166,7 @@ class OpenApiHelper extends Module
     public function _before(TestInterface $test): void
     {
         $this->application = $this->getApplication();
+        $this->statistic = null; // Needs to be unsetted to have a fresh one for each test case.
     }
 
     /**
@@ -204,6 +205,16 @@ class OpenApiHelper extends Module
             'method' => $method,
             'responseCode' => $responseCode,
         ];
+    }
+
+    /**
+     * @param array $headers
+     *
+     * @return void
+     */
+    public function setDefaultHeaders(array $headers): void
+    {
+        $this->defaultHeaders = $headers;
     }
 
     /**
@@ -256,7 +267,7 @@ class OpenApiHelper extends Module
      */
     public function testPath(string $path, string $url, string $method, ?callable $requestManipulator = null): ResponseInterface
     {
-        $this->getStatistics()->recordTests();
+        $this->getStatistics()->recordTest();
 
         $request = $this->createRequest($url, $method, $this->defaultHeaders);
 
@@ -292,7 +303,7 @@ class OpenApiHelper extends Module
         string $method,
         ?callable $requestManipulator = null
     ): ResponseInterface {
-        $this->getStatistics()->recordTests();
+        $this->getStatistics()->recordTest();
 
         $request = $this->createRequest($url, $method, $this->defaultHeaders);
 
@@ -319,7 +330,7 @@ class OpenApiHelper extends Module
         $this->printStatistics();
 
         if ($this->getStatistics()->hasFailures()) {
-            $this->fail('Couldn\t validate your schema file. See output above.');
+            $this->fail('Couldn\'t validate your schema file. See output above.');
         }
 
         if ($this->getStatistics()->getTotalNumberOfTest() === 0) {
@@ -391,8 +402,8 @@ class OpenApiHelper extends Module
         $headers = [];
 
         if ($this->hasRequiredHeaders($operation)) {
-            $headers = $this->resolveRequiredHeaders($operation, $headers, $path, $hook);
             $this->getOutput()->writeln(sprintf('Path %s has headers, searching for possible values.', $path));
+            $headers = $this->resolveRequiredHeaders($operation, $headers, $path, $hook);
         }
 
         $requestManipulator = function (ServerRequestInterface $request) use ($headers, $operation) {

@@ -24,13 +24,13 @@ abstract class AbstractHook extends Module
     }
 
     /**
-     * @param string $endpoint
+     * @param string $path
      * @param string $method
      * @param int $responseCode
      *
      * @return bool
      */
-    abstract public function accept(string $endpoint, string $method, int $responseCode): bool;
+    abstract public function accept(string $path, string $method, int $responseCode): bool;
 
     /**
      * Returns an array of path parameters that will be used to generate the full resource name.
@@ -83,7 +83,7 @@ abstract class AbstractHook extends Module
      *
      * @return string|int|null
      */
-    public function resolveValue(string $name, string $type)
+    public function resolveValue(string $name, string $type): string|int|null
     {
         if ($type === 'path') {
             return $this->getPathParameters()[$name] ?? null;

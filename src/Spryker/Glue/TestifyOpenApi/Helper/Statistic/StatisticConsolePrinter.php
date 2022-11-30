@@ -32,7 +32,8 @@ class StatisticConsolePrinter
 
         $output->writeln('<error>Test(s) failed</error>');
 
-        foreach ($statistic->getStatistics() as $path => $results) {
+        foreach ($statistic->getStatistics() as $path => $methods) {
+
             $table = new Table($output);
 
             $table->setHeaders([
@@ -40,21 +41,22 @@ class StatisticConsolePrinter
                 ['Method', 'Expected Response Code', 'Message'],
             ]);
 
-            if (isset($results['failures'])) {
-                foreach ($results['failures'] as $name => $message) {
-                    [$path, $method, $responseCode] = explode('|', $name);
-                    $table->addRow([strtoupper($method), $responseCode, $message]);
+            foreach ($methods as $method => $results) {
+                if (isset($results['failures'])) {
+                    foreach ($results['failures'] as $message) {
+                        $table->addRow([strtoupper($method), 'xxx', $message]);
+                    }
+                }
+
+                if (isset($results['warnings'])) {
+                    $table->addRow(new TableSeparator());
+
+                    foreach ($results['warnings'] as $message) {
+                        $table->addRow([strtoupper($method), 'xxx', $message]);
+                    }
                 }
             }
 
-            if (isset($results['warnings'])) {
-                $table->addRow(new TableSeparator());
-
-                foreach ($results['warnings'] as $name => $message) {
-                    [$path, $method, $responseCode] = explode('|', $name);
-                    $table->addRow([strtoupper($method), $responseCode, $message]);
-                }
-            }
 
             $table->render();
         }
@@ -64,7 +66,7 @@ class StatisticConsolePrinter
         $totalNumberOfFailures = $statistic->getTotalNumberOfFailures();
         $totalNumberOfWarnings = $statistic->getTotalNumberOfWarnings();
 
-        $successfulTests = $totalNumberOfTests - $totalNumberOfFailures - $totalNumberOfWarnings;
+        $successfulTests = $totalNumberOfTests - $totalNumberOfFailures;
         $output->writeln(sprintf('<fg=green>%s</> of %s were successfully executed', $successfulTests, $totalNumberOfTests));
         $output->writeln(sprintf('<fg=yellow>%s</> tests skipped', $totalNumberOfWarnings));
 

@@ -27,7 +27,7 @@ class Statistic
     /**
      * @return void
      */
-    public function recordTests(): void
+    public function recordTest(): void
     {
         $this->totalOfNumberTests++;
     }
