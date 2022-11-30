@@ -1,5 +1,5 @@
 {
-    "name": "spryker-sdk/testify-openapi",
+    "name": "spryker/testify-openapi",
     "type": "library",
     "description": "TestifyOpenApi module",
     "license": "proprietary",
