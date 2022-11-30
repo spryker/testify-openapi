@@ -54,9 +54,6 @@ jobs:
             - name: Composer install
               run: composer install
 
-            - name: Run Rector checks
-              run: composer rector-diff
-
             - name: Run CodeStyle checks
               run: composer cs-check
 
