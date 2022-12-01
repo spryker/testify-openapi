@@ -45,7 +45,7 @@ class OpenApiHelperTest extends Unit
         $this->expectException(AssertionFailedError::class);
 
         // Act
-        $this->tester->getOpenApiHelper()->testPath('/pets', '/pets', 'get');
+        $this->tester->getOpenApiHelper()->testPath('/pets', '/pets', 'get', 200);
     }
 
     /**
@@ -61,7 +61,7 @@ class OpenApiHelperTest extends Unit
         $this->expectException(NoOperation::class);
 
         // Act
-        $openApiHelper->testPath('/pets', '/pets', 'get');
+        $openApiHelper->testPath('/pets', '/pets', 'get', 200);
     }
 
     /**
@@ -70,9 +70,6 @@ class OpenApiHelperTest extends Unit
     public function testTestPathThrowsInvalidBodyExceptionWhenRequestBodyDoesntMatchTheInTheOpenApiSchemaDefinedOne(): void
     {
         // Arrange
-        // Expected Response Code in the schema is 200 for this request, we return 201 to make the assertion on the response code fail.
-        $this->tester->fakeResponse('/pet', 'put', new JsonResponse());
-
         $openApiHelper = $this->tester->getOpenApiHelper();
         $openApiHelper->setOpenApi(codecept_data_dir('pet.yml'));
 
@@ -80,7 +77,7 @@ class OpenApiHelperTest extends Unit
         $this->expectException(InvalidBody::class);
 
         // Act
-        $openApiHelper->testPath('/pet', '/pet', 'put');
+        $openApiHelper->testPath('/pet', '/pet', 'put', 200);
     }
 
     /**
@@ -99,7 +96,7 @@ class OpenApiHelperTest extends Unit
         $this->expectException(NoResponseCode::class);
 
         // Act
-        $openApiHelper->testPath('/pet', '/pet', 'put', function (ServerRequestInterface $request) {
+        $openApiHelper->testPath('/pet', '/pet', 'put', 200, function (ServerRequestInterface $request) {
             return $request->withBody(Stream::create(json_encode($this->tester->getValidPet())));
         });
     }
@@ -110,14 +107,13 @@ class OpenApiHelperTest extends Unit
     public function testTestPathWithValidRequestAndResponseReturnsResponse(): void
     {
         // Arrange
-        // Expected Response Code in the schema is 200 for this request, we return 201 to make the assertion on the response code fail.
         $this->tester->fakeResponse('/pet', 'put', new JsonResponse($this->tester->getValidPet(), 200));
 
         $openApiHelper = $this->tester->getOpenApiHelper();
         $openApiHelper->setOpenApi(codecept_data_dir('pet.yml'));
 
         // Act
-        $response = $openApiHelper->testPath('/pet', '/pet', 'put', function (ServerRequestInterface $request) {
+        $response = $openApiHelper->testPath('/pet', '/pet', 'put', 200, function (ServerRequestInterface $request) {
             return $request->withBody(Stream::create(json_encode($this->tester->getValidPet())));
         });
 
@@ -130,14 +126,13 @@ class OpenApiHelperTest extends Unit
     public function testTestPathWithoutSchemaValidationValidRequestAndResponseReturnsResponse(): void
     {
         // Arrange
-        // Expected Response Code in the schema is 200 for this request, we return 201 to make the assertion on the response code fail.
         $this->tester->fakeResponse('/pet', 'put', new JsonResponse($this->tester->getValidPet(), 200));
 
         $openApiHelper = $this->tester->getOpenApiHelper();
         $openApiHelper->setOpenApi(codecept_data_dir('pet.yml'));
 
         // Act
-        $response = $openApiHelper->testPathWithoutSchemaValidation('/pet', '/pet', 'put', function (ServerRequestInterface $request) {
+        $response = $openApiHelper->testPathWithoutSchemaValidation('/pet', '/pet', 'put', 200, function (ServerRequestInterface $request) {
             return $request->withBody(Stream::create(json_encode($this->tester->getValidPet())));
         });
 
@@ -150,7 +145,6 @@ class OpenApiHelperTest extends Unit
     public function testTestAllRunsOnlyDefinedPathTestsAndReturnsStatistics(): void
     {
         // Arrange
-        // Expected Response Code in the schema is 200 for this request, we return 201 to make the assertion on the response code fail.
         $this->tester->fakeResponse('/pet', 'put', new JsonResponse($this->tester->getValidPet(), 200));
 
         $openApiHelper = $this->tester->getOpenApiHelper();
@@ -184,5 +178,23 @@ class OpenApiHelperTest extends Unit
 
         // Act
         $openApiHelper->testAllPaths();
+    }
+
+    /**
+     * @return void
+     */
+    public function testTestAllPrintsTableWithInfoAtTheEnd(): void
+    {
+        // Arrange
+        $this->tester->fakeResponse('/pet', 'put', new JsonResponse($this->tester->getValidPet(), 200));
+        $openApiHelper = $this->tester->getOpenApiHelper();
+        $openApiHelper->setOpenApi(codecept_data_dir('pet.yml'));
+        $openApiHelper->setDebugPath('/pet', 'put', 200);
+
+        // Act
+        $openApiHelper->testAllPaths();
+
+        // Assert
+        $this->tester->assertOutputContains('200');
     }
 }

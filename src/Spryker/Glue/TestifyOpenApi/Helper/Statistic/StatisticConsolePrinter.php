@@ -24,13 +24,7 @@ class StatisticConsolePrinter
     {
         $output->writeln('');
 
-        if (!$statistic->hasFailures()) {
-            $output->writeln('<fg=green>All tests pass</>');
-
-            return;
-        }
-
-        $output->writeln('<error>Test(s) failed</error>');
+        $this->printResultInfo($statistic, $output);
 
         foreach ($statistic->getStatistics() as $path => $methods) {
             $table = new Table($output);
@@ -40,18 +34,26 @@ class StatisticConsolePrinter
                 ['Method', 'Expected Response Code', 'Message'],
             ]);
 
-            foreach ($methods as $method => $results) {
-                if (isset($results['failures'])) {
-                    foreach ($results['failures'] as $message) {
-                        $table->addRow([strtoupper($method), 'xxx', $message]);
+            foreach ($methods as $method => $responseCodes) {
+                foreach ($responseCodes as $responseCode => $results) {
+                    if (!isset($results['failures']) && !isset($results['warnings'])) {
+                        $table->addRow([strtoupper($method), $responseCode, 'Successful']);
+
+                        continue;
                     }
-                }
 
-                if (isset($results['warnings'])) {
-                    $table->addRow(new TableSeparator());
+                    if (isset($results['failures'])) {
+                        foreach ($results['failures'] as $message) {
+                            $table->addRow([strtoupper($method), $responseCode, $message]);
+                        }
+                    }
 
-                    foreach ($results['warnings'] as $message) {
-                        $table->addRow([strtoupper($method), 'xxx', $message]);
+                    if (isset($results['warnings'])) {
+                        $table->addRow(new TableSeparator());
+
+                        foreach ($results['warnings'] as $message) {
+                            $table->addRow([strtoupper($method), $responseCode, $message]);
+                        }
                     }
                 }
             }
@@ -71,5 +73,22 @@ class StatisticConsolePrinter
         if ($statistic->hasFailures() === true) {
             $output->writeln(sprintf('<fg=yellow>%s</> Tests failed', $totalNumberOfFailures));
         }
+    }
+
+    /**
+     * @param \Spryker\Glue\TestifyOpenApi\Helper\Statistic\Statistic $statistic
+     * @param \Symfony\Component\Console\Output\OutputInterface $output
+     *
+     * @return void
+     */
+    protected function printResultInfo(Statistic $statistic, OutputInterface $output): void
+    {
+        if (!$statistic->hasFailures()) {
+            $output->writeln('<fg=green>All tests pass</>');
+
+            return;
+        }
+
+        $output->writeln('<error>Test(s) failed</error>');
     }
 }

@@ -22,7 +22,7 @@ coverage:
             - 'tests/_support/*'
 suites:
     Glue:
-        path: SprykerTest/Glue/TestifyOpenApi/Helper
+        path: SprykerTest/Glue/TestifyOpenApi
         actor: TestifyOpenApiTester
         modules:
             enabled:

@@ -34,6 +34,7 @@ class Statistic
 
     /**
      * @param string $path
+     * @param int $expectedResponseCode
      * @param \Psr\Http\Message\ServerRequestInterface $psrRequest
      * @param \Psr\Http\Message\ResponseInterface $psrResponse
      * @param \Symfony\Component\HttpFoundation\Request $symfonyRequest
@@ -43,6 +44,7 @@ class Statistic
      */
     public function addRequestsResponses(
         string $path,
+        int $expectedResponseCode,
         ServerRequestInterface $psrRequest,
         ResponseInterface $psrResponse,
         Request $symfonyRequest,
@@ -50,11 +52,7 @@ class Statistic
     ) {
         $method = $psrRequest->getMethod();
 
-        if (!isset($this->statistics[$path][$method]['results'])) {
-            $this->statistics[$path][$method]['results'] = [];
-        }
-
-        $this->statistics[$path][$method]['results'][] = [
+        $this->statistics[$path][$method][$expectedResponseCode]['requestsAndResponses'] = [
             [
                 'psrRequest' => $psrRequest,
                 'symfonyRequest' => $symfonyRequest,
@@ -69,17 +67,18 @@ class Statistic
     /**
      * @param string $path
      * @param string $method
+     * @param int $expectedResponseCode
      * @param string $failureMessage
      *
      * @return $this
      */
-    public function addFailure(string $path, string $method, string $failureMessage)
+    public function addFailure(string $path, string $method, int $expectedResponseCode, string $failureMessage)
     {
-        if (!isset($this->statistics[$path][$method]['failures'])) {
-            $this->statistics[$path][$method]['failures'] = [];
+        if (!isset($this->statistics[$path][$method][$expectedResponseCode]['failures'])) {
+            $this->statistics[$path][$method][$expectedResponseCode]['failures'] = [];
         }
 
-        $this->statistics[$path][$method]['failures'][] = $failureMessage;
+        $this->statistics[$path][$method][$expectedResponseCode]['failures'][] = $failureMessage;
 
         return $this;
     }
@@ -89,10 +88,12 @@ class Statistic
      */
     public function hasFailures(): bool
     {
-        foreach ($this->statistics as $paths) {
-            foreach ($paths as $statistic) {
-                if (isset($statistic['failures']) && count($statistic['failures'])) {
-                    return true;
+        foreach ($this->statistics as $methods) {
+            foreach ($methods as $responseCodes) {
+                foreach ($responseCodes as $statistic) {
+                    if (isset($statistic['failures']) && count($statistic['failures'])) {
+                        return true;
+                    }
                 }
             }
         }
@@ -103,17 +104,18 @@ class Statistic
     /**
      * @param string $path
      * @param string $method
+     * @param string|int $expectedResponseCode
      * @param string $warningMessage
      *
      * @return $this
      */
-    public function addWarning(string $path, string $method, string $warningMessage)
+    public function addWarning(string $path, string $method, string|int $expectedResponseCode, string $warningMessage)
     {
-        if (!isset($this->statistics[$path][$method]['warnings'])) {
-            $this->statistics[$path][$method]['warnings'] = [];
+        if (!isset($this->statistics[$path][$method][$expectedResponseCode]['warnings'])) {
+            $this->statistics[$path][$method][$expectedResponseCode]['warnings'] = [];
         }
 
-        $this->statistics[$path][$method]['warnings'][] = $warningMessage;
+        $this->statistics[$path][$method][$expectedResponseCode]['warnings'][] = $warningMessage;
 
         return $this;
     }
@@ -141,9 +143,13 @@ class Statistic
     {
         $totalNumberOfFailures = 0;
 
-        foreach ($this->statistics as $paths) {
-            foreach ($paths as $statistic) {
-                $totalNumberOfFailures += count($statistic['failures']);
+        foreach ($this->statistics as $methods) {
+            foreach ($methods as $responseCodes) {
+                foreach ($responseCodes as $statistic) {
+                    if (isset($statistic['failures'])) {
+                        $totalNumberOfFailures += count($statistic['failures']);
+                    }
+                }
             }
         }
 

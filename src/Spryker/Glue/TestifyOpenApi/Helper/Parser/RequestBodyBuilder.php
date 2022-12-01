@@ -11,17 +11,20 @@ use cebe\openapi\spec\MediaType;
 use cebe\openapi\spec\Operation;
 use cebe\openapi\spec\RequestBody;
 use cebe\openapi\spec\Schema;
+use Exception;
 use Nyholm\Psr7\Stream;
+use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\StreamInterface;
 
 class RequestBodyBuilder
 {
     /**
      * @param \cebe\openapi\spec\Operation $operation
+     * @param \Psr\Http\Message\ServerRequestInterface $request
      *
      * @return \Psr\Http\Message\StreamInterface|null
      */
-    public function buildRequestBody(Operation $operation): ?StreamInterface
+    public function buildRequestBody(Operation $operation, ServerRequestInterface $request): ?StreamInterface
     {
         $requestBody = $operation->requestBody;
 
@@ -33,19 +36,19 @@ class RequestBodyBuilder
             return null;
         }
 
-        $mediaType = $requestBody->content['application/json'];
+        $mediaType = $this->getMediaTypeByRequestHeader($requestBody, $request);
 
-        if (!is_a($mediaType, MediaType::class) || !$mediaType->schema) {
+        if ($mediaType === null || !is_a($mediaType, MediaType::class) || !$mediaType->schema) {
             return null;
         }
 
         $schema = $mediaType->schema;
 
-        if (!is_a($schema, Schema::class) || !$schema->properties) {
+        if (!is_a($schema, Schema::class) || (!$schema->items && !$schema->properties)) {
             return null;
         }
 
-        $requestData = $this->createRequestData($schema->properties);
+        $requestData = $this->createRequestData($schema);
 
         $jsonRequest = json_encode($requestData);
 
@@ -57,16 +60,44 @@ class RequestBodyBuilder
     }
 
     /**
-     * @param array $properties
+     * @param \cebe\openapi\spec\RequestBody $requestBody
+     * @param \Psr\Http\Message\ServerRequestInterface $request
+     *
+     * @return \cebe\openapi\spec\MediaType|null
+     */
+    protected function getMediaTypeByRequestHeader(RequestBody $requestBody, ServerRequestInterface $request): ?MediaType
+    {
+        $headers = $request->getHeaders();
+
+        if (!isset($headers['Content-Type'])) {
+            return null;
+        }
+
+        $contentType = $headers['Content-Type'][0];
+
+        if (!isset($requestBody->content[$contentType])) {
+            return null;
+        }
+
+        return $requestBody->content[$contentType];
+    }
+
+    /**
+     * @param \cebe\openapi\spec\Schema $schema
      *
      * @return array
      */
-    protected function createRequestData(array $properties): array
+    protected function createRequestData(Schema $schema): array
     {
+        if ($schema->items) {
+            return $this->createFromItems($schema);
+        }
+
         $data = [];
 
-        foreach ($properties as $propertyName => $schema) {
-            $data[$propertyName] = $this->getValue($schema);
+        /** @var \cebe\openapi\spec\Schema $propertySchema */
+        foreach ($schema->properties as $propertyName => $propertySchema) {
+            $data[$propertyName] = $this->getValue($propertySchema);
         }
 
         return $data;
@@ -74,6 +105,25 @@ class RequestBodyBuilder
 
     /**
      * @param \cebe\openapi\spec\Schema $schema
+     *
+     * @return array
+     */
+    protected function createFromItems(Schema $schema): array
+    {
+        /** @var \cebe\openapi\spec\Schema $items */
+        $items = $schema->items;
+
+        if ($items instanceof Schema && $schema->type === 'array') {
+            return [$this->getValue($items)];
+        }
+
+        return $this->getValue($items);
+    }
+
+    /**
+     * @param \cebe\openapi\spec\Schema $schema
+     *
+     * @throws \Exception
      *
      * @return mixed|array<array>|array<string>|array<int>|string|int
      */
@@ -86,48 +136,59 @@ class RequestBodyBuilder
         }
 
         if ($schema->enum) {
-            // Return randomly one of the enums
-            // @TODO this one is very likely ending up in flaky tests
-            return $schema->enum[rand(0, count($schema->enum) - 1)];
+            // Return always the first enum to avoid flake tests
+            return $schema->enum[0];
         }
 
-        if ($schema->properties) {
-            return $this->createRequestData($schema->properties);
+        if ($type === 'boolean') {
+            // Always return true for easier testing
+            return true;
         }
 
-        if ($schema->items && is_a($schema->items, Schema::class)) {
-            $value = $this->getValueByType($schema->items->type, $schema);
+        if ($type === 'object') {
+            return $this->createRequestData($schema);
+        }
 
-            if ($type === 'array') {
-                return [$value];
+        if ($type === 'array') {
+            if (!$schema->items || !is_a($schema->items, Schema::class)) {
+                throw new Exception(sprintf('Expected a Schema object but got: %s', gettype($schema->items)));
             }
 
-            return $value;
+            if ($schema->items->type !== 'object') {
+                return [$this->getValue($schema->items)];
+            }
+
+            return [$this->createRequestData($schema->items)];
         }
 
-        return $this->getValueByType($schema->type, $schema);
+        if ($type === 'string') {
+            return $this->string($schema);
+        }
+
+        return $this->integer($schema);
     }
 
     /**
-     * @param string $type
      * @param \cebe\openapi\spec\Schema $schema
      *
-     * @return array|string|int|null
+     * @return string
      */
-    protected function getValueByType(string $type, Schema $schema)
+    protected function string(Schema $schema): string
     {
-        if ($type === 'string') {
-            return 'string';
+        if ($schema->format && $schema->format === 'date-time') {
+            return '2022-12-01T13:51:46.495Z';
         }
 
-        if ($type === 'integer') {
-            return rand();
-        }
+        return 'string';
+    }
 
-        if ($type === 'object' && $schema->items && is_a($schema->items, Schema::class)) {
-            return $this->createRequestData($schema->items->properties);
-        }
-
-        return null;
+    /**
+     * @param \cebe\openapi\spec\Schema $schema
+     *
+     * @return int
+     */
+    protected function integer(Schema $schema): int
+    {
+        return 0;
     }
 }

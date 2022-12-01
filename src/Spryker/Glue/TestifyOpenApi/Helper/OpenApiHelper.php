@@ -261,11 +261,12 @@ class OpenApiHelper extends Module
      * @param string $path
      * @param string $url
      * @param string $method
+     * @param int $expectedResponseCode
      * @param callable|null $requestManipulator
      *
      * @return \Psr\Http\Message\ResponseInterface
      */
-    public function testPath(string $path, string $url, string $method, ?callable $requestManipulator = null): ResponseInterface
+    public function testPath(string $path, string $url, string $method, int $expectedResponseCode, ?callable $requestManipulator = null): ResponseInterface
     {
         $this->getStatistics()->recordTest();
 
@@ -277,7 +278,7 @@ class OpenApiHelper extends Module
 
         $operationAddress = $this->validateRequest($request);
 
-        $response = $this->handleRequestInTheGlueApplication($request, $path);
+        $response = $this->handleRequestInTheGlueApplication($request, $path, $expectedResponseCode);
 
         $this->validateResponse($response, $operationAddress);
 
@@ -293,6 +294,7 @@ class OpenApiHelper extends Module
      * @param string $path
      * @param string $url
      * @param string $method
+     * @param int $expectedResponseCode
      * @param callable|null $requestManipulator
      *
      * @return \Psr\Http\Message\ResponseInterface
@@ -301,6 +303,7 @@ class OpenApiHelper extends Module
         string $path,
         string $url,
         string $method,
+        int $expectedResponseCode,
         ?callable $requestManipulator = null
     ): ResponseInterface {
         $this->getStatistics()->recordTest();
@@ -311,7 +314,7 @@ class OpenApiHelper extends Module
             $request = $requestManipulator($request);
         }
 
-        $response = $this->handleRequestInTheGlueApplication($request, $path);
+        $response = $this->handleRequestInTheGlueApplication($request, $path, $expectedResponseCode);
 
         $this->validateResponse($response, $this->getOperationAddress($request));
 
@@ -391,7 +394,7 @@ class OpenApiHelper extends Module
         $name = sprintf('%s|%s|%s', $path, $method, $responseCode);
 
         if (!is_numeric($responseCode)) {
-            $this->getStatistics()->addWarning($path, $method, 'Response code is not numeric and can\'t be tested automatically.');
+            $this->getStatistics()->addWarning($path, $method, $responseCode, 'Response code is not numeric and can\'t be tested automatically.');
 
             return;
         }
@@ -407,7 +410,7 @@ class OpenApiHelper extends Module
         }
 
         $requestManipulator = function (ServerRequestInterface $request) use ($headers, $operation) {
-            $requestBody = (new RequestBodyBuilder())->buildRequestBody($operation);
+            $requestBody = (new RequestBodyBuilder())->buildRequestBody($operation, $request);
 
             if ($requestBody) {
                 $request = $request->withBody($requestBody);
@@ -432,10 +435,10 @@ class OpenApiHelper extends Module
         // Run application
         try {
             $this->getOutput()->writeln('Sending request...');
-            $this->testPath($path, $url, $method, $requestManipulator);
+            $this->testPath($path, $url, $method, (int)$responseCode, $requestManipulator);
             $this->getOutput()->writeln('<fg=green>Received request, seems to be all good.</>');
         } catch (Throwable $exception) {
-            $this->getStatistics()->addFailure($path, $method, $exception->getMessage());
+            $this->getStatistics()->addFailure($path, $method, (int)$responseCode, $exception->getMessage());
             $this->getOutput()->writeln(sprintf('<error>%s</error>', $exception->getMessage()));
         }
     }
@@ -447,6 +450,10 @@ class OpenApiHelper extends Module
      */
     protected function requiresBearerAuthentication(Operation $operation): bool
     {
+        if (!isset($operation->security)) {
+            return false;
+        }
+
         foreach ($operation->security as $securityRequirement) {
             $security = (array)$securityRequirement->getSerializableData();
 
@@ -795,10 +802,11 @@ class OpenApiHelper extends Module
     /**
      * @param \Psr\Http\Message\ServerRequestInterface $psrRequest
      * @param string $path
+     * @param int $expectedResponseCode
      *
      * @return \Psr\Http\Message\ResponseInterface
      */
-    protected function handleRequestInTheGlueApplication(ServerRequestInterface $psrRequest, string $path): ResponseInterface
+    protected function handleRequestInTheGlueApplication(ServerRequestInterface $psrRequest, string $path, int $expectedResponseCode): ResponseInterface
     {
         // Convert to Symfony HttpFoundation Request
         $httpFoundationFactory = new HttpFoundationFactory();
@@ -813,7 +821,7 @@ class OpenApiHelper extends Module
 
         $psrResponse = $psrHttpFactory->createResponse($symfonyResponse);
 
-        $this->getStatistics()->addRequestsResponses($path, $psrRequest, $psrResponse, $symfonyRequest, $symfonyResponse);
+        $this->getStatistics()->addRequestsResponses($path, $expectedResponseCode, $psrRequest, $psrResponse, $symfonyRequest, $symfonyResponse);
 
         return $psrResponse;
     }
