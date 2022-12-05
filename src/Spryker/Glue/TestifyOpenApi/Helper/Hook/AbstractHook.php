@@ -69,10 +69,11 @@ abstract class AbstractHook extends Module
 
     /**
      * @param \Psr\Http\Message\ServerRequestInterface $request
+     * @param int $responseCode
      *
      * @return \Psr\Http\Message\ServerRequestInterface
      */
-    public function prepareRequest(ServerRequestInterface $request): ServerRequestInterface
+    public function manipulateRequest(ServerRequestInterface $request, int $responseCode): ServerRequestInterface
     {
         return $request;
     }

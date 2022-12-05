@@ -8,13 +8,13 @@
 namespace SprykerTest\Glue\TestifyOpenApi\Helper;
 
 use Codeception\Test\Unit;
-use League\OpenAPIValidation\PSR7\Exception\NoOperation;
-use League\OpenAPIValidation\PSR7\Exception\NoResponseCode;
 use League\OpenAPIValidation\PSR7\Exception\Validation\InvalidBody;
 use Nyholm\Psr7\Stream;
 use PHPUnit\Framework\AssertionFailedError;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
+use Spryker\Glue\TestifyOpenApi\Exception\OperationNotFoundException;
+use Spryker\Glue\TestifyOpenApi\Exception\ValidationFailedException;
 use Spryker\Glue\TestifyOpenApi\Helper\Statistic\Statistic;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use TestifyOpenApi\TestifyOpenApiTester;
@@ -58,7 +58,7 @@ class OpenApiHelperTest extends Unit
         $openApiHelper->setOpenApi(codecept_data_dir('pet.yml'));
 
         // Expect
-        $this->expectException(NoOperation::class);
+        $this->expectException(OperationNotFoundException::class);
 
         // Act
         $openApiHelper->testPath('/pets', '/pets', 'get', 200);
@@ -77,13 +77,16 @@ class OpenApiHelperTest extends Unit
         $this->expectException(InvalidBody::class);
 
         // Act
-        $openApiHelper->testPath('/pet', '/pet', 'put', 200);
+        // We need to set a wrong body as the default generated one is valid
+        $openApiHelper->testPath('/pet', '/pet', 'put', 200, function (ServerRequestInterface $request) {
+            return $request->withBody(Stream::create('{}'));
+        });
     }
 
     /**
      * @return void
      */
-    public function testTestPathThrowsNoResponseCodeExceptionWhenExpectedResponseCodeAndActualResponseCodeDoesntMatch(): void
+    public function testTestPathThrowsValidationFailedExceptionWhenExpectedResponseCodeAndActualResponseCodeDontMatch(): void
     {
         // Arrange
         // Expected Response Code in the schema is 200 for this request, we return 201 to make the assertion on the response code fail.
@@ -93,7 +96,7 @@ class OpenApiHelperTest extends Unit
         $openApiHelper->setOpenApi(codecept_data_dir('pet.yml'));
 
         // Expect
-        $this->expectException(NoResponseCode::class);
+        $this->expectException(ValidationFailedException::class);
 
         // Act
         $openApiHelper->testPath('/pet', '/pet', 'put', 200, function (ServerRequestInterface $request) {

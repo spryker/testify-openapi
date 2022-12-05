@@ -12,6 +12,7 @@ use cebe\openapi\spec\OpenApi;
 use cebe\openapi\spec\Operation;
 use cebe\openapi\spec\Parameter;
 use cebe\openapi\spec\PathItem;
+use cebe\openapi\spec\RequestBody;
 use cebe\openapi\spec\Response as OperationResponse;
 use cebe\openapi\spec\Schema;
 use Codeception\Lib\ModuleContainer;
@@ -19,11 +20,15 @@ use Codeception\Module;
 use Codeception\Stub;
 use Codeception\TestInterface;
 use Exception;
+use League\OpenAPIValidation\PSR7\Exception\Validation\InvalidHeaders;
+use League\OpenAPIValidation\PSR7\Exception\ValidationFailed;
 use League\OpenAPIValidation\PSR7\OperationAddress;
 use League\OpenAPIValidation\PSR7\PathFinder;
 use League\OpenAPIValidation\PSR7\ResponseValidator;
 use League\OpenAPIValidation\PSR7\ServerRequestValidator;
 use Nyholm\Psr7\Factory\Psr17Factory;
+use Nyholm\Psr7\Stream;
+use PHPUnit\Framework\Assert;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Ramsey\Uuid\Uuid;
@@ -34,8 +39,12 @@ use Spryker\Glue\AuthRestApi\Processor\AccessTokens\AccessTokenValidator;
 use Spryker\Glue\GlueApplication\Bootstrap\GlueBootstrap;
 use Spryker\Glue\GlueApplication\GlueApplicationDependencyProvider;
 use Spryker\Glue\RestRequestValidator\Plugin\ValidateRestRequestAttributesPlugin;
+use Spryker\Glue\TestifyOpenApi\Exception\InvalidParameterValueException;
+use Spryker\Glue\TestifyOpenApi\Exception\OperationNotFoundException;
+use Spryker\Glue\TestifyOpenApi\Exception\ValidationFailedException;
 use Spryker\Glue\TestifyOpenApi\Helper\Hook\AbstractHook;
 use Spryker\Glue\TestifyOpenApi\Helper\Parser\RequestBodyBuilder;
+use Spryker\Glue\TestifyOpenApi\Helper\Parser\ValueResolver;
 use Spryker\Glue\TestifyOpenApi\Helper\Statistic\Statistic;
 use Spryker\Glue\TestifyOpenApi\Helper\Statistic\StatisticConsolePrinter;
 use Spryker\Shared\Application\ApplicationInterface;
@@ -64,37 +73,19 @@ class OpenApiHelper extends Module
     protected ?OpenApi $openApi = null;
 
     /**
-     * @var array<string, string>
-     */
-    protected array $defaultHeaders = [
-        'Accept' => 'application/json',
-        'Content-Type' => 'application/json',
-    ];
-
-    /**
      * @var \Symfony\Component\HttpKernel\HttpKernelInterface|null
      */
     protected ?HttpKernelInterface $application = null;
 
     /**
+     * @var string|null
+     */
+    protected ?string $accessToken = null;
+
+    /**
      * @var \Symfony\Component\Console\Output\ConsoleOutputInterface|null
      */
     protected ?ConsoleOutputInterface $output = null;
-
-    /**
-     * @var array<string, string|int>
-     */
-    protected array $definedHeaders = [];
-
-    /**
-     * @var array<string, string|int>
-     */
-    protected array $definedPathParameters = [];
-
-    /**
-     * @var array<string, string|int>
-     */
-    protected array $definedQueryParameters = [];
 
     /**
      * Use this to debug only one specific endpoint. Use `setDebugPath()` method to run only one specified test case
@@ -133,6 +124,16 @@ class OpenApiHelper extends Module
     }
 
     /**
+     * @param string $accessToken
+     *
+     * @return void
+     */
+    public function setAccessToken(string $accessToken): void
+    {
+        $this->accessToken = $accessToken;
+    }
+
+    /**
      * @return \Spryker\Glue\TestifyOpenApi\Helper\Statistic\Statistic
      */
     protected function getStatistics(): Statistic
@@ -165,7 +166,6 @@ class OpenApiHelper extends Module
      */
     public function _before(TestInterface $test): void
     {
-        $this->application = $this->getApplication();
         $this->statistic = null; // Needs to be unsetted to have a fresh one for each test case.
     }
 
@@ -208,46 +208,6 @@ class OpenApiHelper extends Module
     }
 
     /**
-     * @param array $headers
-     *
-     * @return void
-     */
-    public function setDefaultHeaders(array $headers): void
-    {
-        $this->defaultHeaders = $headers;
-    }
-
-    /**
-     * @param array<string, string|int> $headers
-     *
-     * @return void
-     */
-    public function setHeaders(array $headers): void
-    {
-        $this->definedHeaders = $headers;
-    }
-
-    /**
-     * @param array<string, string|int> $pathParameters
-     *
-     * @return void
-     */
-    public function setPathParameters(array $pathParameters): void
-    {
-        $this->definedPathParameters = $pathParameters;
-    }
-
-    /**
-     * @param array<string, string|int> $pathQueryParameters
-     *
-     * @return void
-     */
-    public function setQueryParameters(array $pathQueryParameters): void
-    {
-        $this->definedQueryParameters = $pathQueryParameters;
-    }
-
-    /**
      * @param \Spryker\Glue\TestifyOpenApi\Helper\Hook\AbstractHook $hook
      *
      * @return void
@@ -268,21 +228,7 @@ class OpenApiHelper extends Module
      */
     public function testPath(string $path, string $url, string $method, int $expectedResponseCode, ?callable $requestManipulator = null): ResponseInterface
     {
-        $this->getStatistics()->recordTest();
-
-        $request = $this->createRequest($url, $method, $this->defaultHeaders);
-
-        if ($requestManipulator) {
-            $request = $requestManipulator($request);
-        }
-
-        $operationAddress = $this->validateRequest($request);
-
-        $response = $this->handleRequestInTheGlueApplication($request, $path, $expectedResponseCode);
-
-        $this->validateResponse($response, $operationAddress);
-
-        return $response;
+        return $this->doTestPath($path, $url, $method, $expectedResponseCode, true, $requestManipulator);
     }
 
     /**
@@ -306,19 +252,132 @@ class OpenApiHelper extends Module
         int $expectedResponseCode,
         ?callable $requestManipulator = null
     ): ResponseInterface {
+        return $this->doTestPath($path, $url, $method, $expectedResponseCode, false, $requestManipulator);
+    }
+
+    /**
+     * @param string $path
+     * @param string|null $url
+     * @param string $method
+     * @param int $expectedResponseCode
+     * @param bool $requestValidationEnabled
+     * @param callable|null $requestManipulator
+     *
+     * @return \Psr\Http\Message\ResponseInterface
+     */
+    protected function doTestPath(
+        string $path,
+        ?string $url,
+        string $method,
+        int $expectedResponseCode,
+        bool $requestValidationEnabled = true,
+        ?callable $requestManipulator = null
+    ): ResponseInterface {
         $this->getStatistics()->recordTest();
 
-        $request = $this->createRequest($url, $method, $this->defaultHeaders);
+        $hook = $this->findHook($path, $method, $expectedResponseCode);
 
-        if ($requestManipulator) {
-            $request = $requestManipulator($request);
+        $operation = $this->getOperation($path, $method);
+
+        $headers = $this->resolveRequiredHeaders($operation, $path, $hook);
+
+        $finalRequestManipulator = function (ServerRequestInterface $request) use ($headers, $operation, $requestManipulator) {
+            // We first need to add the required request headers otherwise we can't get a valida request body if needed.
+            foreach ($headers as $headerName => $headerValue) {
+                $request = $request->withHeader($headerName, $headerValue);
+            }
+
+            $requestBody = (new RequestBodyBuilder())->buildRequestBody($operation, $request);
+
+            if ($requestBody) {
+                $request = $request->withBody($requestBody);
+            }
+
+            if ($this->requiresBearerAuthentication($operation)) {
+                $request = $request->withHeader('Authorization', 'Bearer ' . $this->getAccessToken());
+            }
+
+            if ($requestManipulator) {
+                return $requestManipulator($request);
+            }
+
+            return $request;
+        };
+
+        if (!$url) {
+            $url = $this->generateUrl($path, $operation, $hook);
+        }
+
+        $request = $this->createRequest($url, $method);
+
+        $request = $finalRequestManipulator($request);
+
+        $operationAddress = $this->validateRequest($request, $requestValidationEnabled);
+
+        // Force a 400 Invalid Request
+        if ($expectedResponseCode === 400) {
+            // Empty the body to get back a 400 Invalid Request
+            $request = $request->withBody(Stream::create(''));
+        }
+
+        // Force a 401 Unauthorized
+        if ($expectedResponseCode === 401) {
+            // Wrong Bearer should result in a 401
+            $request = $request->withHeader('Authorization', 'Bearer 12345');
+        }
+
+        // Force a 403 Forbidden
+        if ($expectedResponseCode === 403) {
+            // Remove Authorization header should result in a 403
+            $request = $request->withoutHeader('Authorization');
+        }
+
+        if ($hook) {
+            $request = $hook->manipulateRequest($request, $expectedResponseCode);
         }
 
         $response = $this->handleRequestInTheGlueApplication($request, $path, $expectedResponseCode);
 
-        $this->validateResponse($response, $this->getOperationAddress($request));
+        $this->validateResponse($response, $operationAddress, $method, $path, $expectedResponseCode);
 
         return $response;
+    }
+
+    /**
+     * @return string
+     */
+    protected function getAccessToken(): string
+    {
+        if ($this->accessToken) {
+            return $this->accessToken;
+        }
+
+        return Uuid::uuid4()->toString();
+    }
+
+    /**
+     * @param string $lookupPath
+     * @param string $lookupMethod
+     *
+     * @throws \Spryker\Glue\TestifyOpenApi\Exception\OperationNotFoundException
+     *
+     * @return \cebe\openapi\spec\Operation
+     */
+    protected function getOperation(string $lookupPath, string $lookupMethod): Operation
+    {
+        foreach ($this->getOpenApi()->paths as $path => $pathItem) {
+            if ($lookupPath !== $path) {
+                continue;
+            }
+
+            foreach ($pathItem->getOperations() as $method => $operation) {
+                if (strtolower($lookupMethod) === strtolower($method)) {
+                    return $operation;
+                }
+            }
+        }
+
+        throw new OperationNotFoundException(sprintf('Couldn\'t find an operation for [%s] %s', $lookupMethod, $lookupPath));
     }
 
     /**
@@ -391,55 +450,17 @@ class OpenApiHelper extends Module
             return;
         }
 
-        $name = sprintf('%s|%s|%s', $path, $method, $responseCode);
-
         if (!is_numeric($responseCode)) {
             $this->getStatistics()->addWarning($path, $method, $responseCode, 'Response code is not numeric and can\'t be tested automatically.');
 
             return;
         }
 
-        $this->getOutput()->writeln(sprintf('Searching hook point for %s', $name));
-        $hook = $this->findHook($path, $method, (int)$responseCode);
-
-        $headers = [];
-
-        if ($this->hasRequiredHeaders($operation)) {
-            $this->getOutput()->writeln(sprintf('Path %s has headers, searching for possible values.', $path));
-            $headers = $this->resolveRequiredHeaders($operation, $headers, $path, $hook);
-        }
-
-        $requestManipulator = function (ServerRequestInterface $request) use ($headers, $operation) {
-            $requestBody = (new RequestBodyBuilder())->buildRequestBody($operation, $request);
-
-            if ($requestBody) {
-                $request = $request->withBody($requestBody);
-            }
-
-            if ($this->requiresBearerAuthentication($operation)) {
-                $request = $request->withHeader('Authorization', 'Bearer ' . Uuid::uuid4());
-            }
-
-            foreach ($headers as $headerName => $headerValue) {
-                $request = $request->withHeader($headerName, $headerValue);
-            }
-
-            return $request;
-        };
-
-        $url = $this->generateUrl($path, $operation, $hook);
-        $this->getOutput()->writeln(sprintf('Generated URL: %s', $url));
-
-        $this->getOutput()->writeln('Preparing request');
-
         // Run application
         try {
-            $this->getOutput()->writeln('Sending request...');
-            $this->testPath($path, $url, $method, (int)$responseCode, $requestManipulator);
-            $this->getOutput()->writeln('<fg=green>Received request, seems to be all good.</>');
+            $this->doTestPath($path, null, $method, (int)$responseCode);
         } catch (Throwable $exception) {
             $this->getStatistics()->addFailure($path, $method, (int)$responseCode, $exception->getMessage());
-            $this->getOutput()->writeln(sprintf('<error>%s</error>', $exception->getMessage()));
         }
     }
 
@@ -476,17 +497,11 @@ class OpenApiHelper extends Module
     {
         foreach (static::$hooks as $hook) {
             if ($hook->accept($path, $method, $responseCode)) {
-                $this->getOutput()->writeln('');
-                $this->getOutput()->writeln(sprintf('Found hook: %s', $hook->getDescription()));
-
                 $hook->setUp();
 
                 return $hook;
             }
         }
-
-        $this->getOutput()->writeln('');
-        $this->getOutput()->writeln('No hook found');
 
         return null;
     }
@@ -497,53 +512,52 @@ class OpenApiHelper extends Module
      * In the schema you will most likely have paths defined like `/foo/{bar}` + maybe defined query parameters.
      * By the given schema we will replace the placeholder with values and add query parameters to the URL.
      *
-     * @param string $endpoint
+     * @param string $path
      * @param \cebe\openapi\spec\Operation $operation
      * @param \Spryker\Glue\TestifyOpenApi\Helper\Hook\AbstractHook|null $hook
      *
      * @return string
      */
-    protected function generateUrl(string $endpoint, Operation $operation, ?AbstractHook $hook): string
+    protected function generateUrl(string $path, Operation $operation, ?AbstractHook $hook): string
     {
-        $endpoint = $this->addPathParameter($endpoint, $operation, $hook);
+        $path = $this->addPathParameter($path, $operation, $hook);
 
-        return $this->addQueryParameter($endpoint, $operation, $hook);
+        return $this->addQueryParameter($path, $operation, $hook);
     }
 
     /**
-     * @param string $endpoint
+     * @param string $path
      * @param \cebe\openapi\spec\Operation $operation
      * @param \Spryker\Glue\TestifyOpenApi\Helper\Hook\AbstractHook|null $hook
      *
      * @return string
      */
-    protected function addPathParameter(string $endpoint, Operation $operation, ?AbstractHook $hook): string
+    protected function addPathParameter(string $path, Operation $operation, ?AbstractHook $hook): string
     {
-        $pathParams = $this->resolveParams($operation, 'path', $endpoint, $hook);
+        $pathParams = $this->resolveParams($operation, 'path', $hook);
 
         foreach ($pathParams as $pathParamName => $pathParamValue) {
-            $endpoint = str_replace(sprintf('{%s}', $pathParamName), $pathParamValue, $endpoint);
+            $path = str_replace(sprintf('{%s}', $pathParamName), $pathParamValue, $path);
         }
 
-        return $endpoint;
+        return $path;
     }
 
     /**
      * @param \cebe\openapi\spec\Operation $operation
      * @param string $type
-     * @param string $endpoint
      * @param \Spryker\Glue\TestifyOpenApi\Helper\Hook\AbstractHook|null $hook
      *
      * @return array
      */
-    protected function resolveParams(Operation $operation, string $type, string $endpoint, ?AbstractHook $hook): array
+    protected function resolveParams(Operation $operation, string $type, ?AbstractHook $hook): array
     {
         $resolvedParameters = [];
 
         /** @var \cebe\openapi\spec\Parameter $parameter */
         foreach ($operation->parameters as $parameter) {
             if ($parameter->in === $type) {
-                $resolvedParameters[$parameter->name] = $this->resolveValueForParameter($parameter, $endpoint, $type, $hook);
+                $resolvedParameters[$parameter->name] = $this->resolveValueForParameter($parameter, $type, $hook);
             }
         }
 
@@ -551,15 +565,15 @@ class OpenApiHelper extends Module
     }
 
     /**
-     * @param string $endpoint
+     * @param string $path
      * @param \cebe\openapi\spec\Operation $operation
      * @param \Spryker\Glue\TestifyOpenApi\Helper\Hook\AbstractHook|null $hook
      *
      * @return string
      */
-    protected function addQueryParameter(string $endpoint, Operation $operation, ?AbstractHook $hook): string
+    protected function addQueryParameter(string $path, Operation $operation, ?AbstractHook $hook): string
     {
-        $resolvedQueryParams = $this->resolveParams($operation, 'query', $endpoint, $hook);
+        $resolvedQueryParams = $this->resolveParams($operation, 'query', $hook);
         $queryParameters = [];
 
         foreach ($resolvedQueryParams as $queryParamName => $queryParamValue) {
@@ -567,10 +581,10 @@ class OpenApiHelper extends Module
         }
 
         if (!count($queryParameters)) {
-            return $endpoint;
+            return $path;
         }
 
-        return sprintf('%s?%s', $endpoint, implode('&', $queryParameters));
+        return sprintf('%s?%s', $path, implode('&', $queryParameters));
     }
 
     /**
@@ -592,19 +606,25 @@ class OpenApiHelper extends Module
 
     /**
      * @param \cebe\openapi\spec\Operation $operation
-     * @param array $headers
      * @param string $path
      * @param \Spryker\Glue\TestifyOpenApi\Helper\Hook\AbstractHook|null $hook
      *
      * @return array<string, string>
      */
-    protected function resolveRequiredHeaders(Operation $operation, array $headers, string $path, ?AbstractHook $hook): array
+    protected function resolveRequiredHeaders(Operation $operation, string $path, ?AbstractHook $hook): array
     {
+        $headers = [];
+
         /** @var \cebe\openapi\spec\Parameter $parameter */
         foreach ($operation->parameters as $parameter) {
             if ($parameter->in === 'header' && $parameter->required) {
-                $headers[$parameter->name] = $this->resolveValueForParameter($parameter, $path, 'header', $hook);
+                $headers[$parameter->name] = (string)$this->resolveValueForParameter($parameter, 'header', $hook);
             }
+        }
+
+        if ($operation->requestBody && is_a($operation->requestBody, RequestBody::class) && $operation->requestBody->content) {
+            // @TODO Add correct Content-Type header. Maybe set an expected one before running the tests?
+            $headers['Content-Type'] = 'application/json';
         }
 
         return $headers;
@@ -612,20 +632,16 @@ class OpenApiHelper extends Module
 
     /**
      * @param \cebe\openapi\spec\Parameter $parameter
-     * @param string $path
      * @param string $type
      * @param \Spryker\Glue\TestifyOpenApi\Helper\Hook\AbstractHook|null $hook
      *
      * @throws \Exception
+     * @throws \Spryker\Glue\TestifyOpenApi\Exception\InvalidParameterValueException
      *
      * @return string|int
      */
-    protected function resolveValueForParameter(Parameter $parameter, string $path, string $type, ?AbstractHook $hook)
+    protected function resolveValueForParameter(Parameter $parameter, string $type, ?AbstractHook $hook)
     {
-        if (isset($this->definedHeaders[$parameter->name])) {
-            return $this->definedHeaders[$parameter->name];
-        }
-
         if ($hook) {
             $resolvedValue = $hook->resolveValue($parameter->name, $type);
 
@@ -638,7 +654,13 @@ class OpenApiHelper extends Module
             throw new Exception(sprintf('Parameter %s doesn\'t have a schema defined. Can\'t get a value for it.', $parameter->name));
         }
 
-        return $resolvedValue ?? $this->getValueForParameter($parameter->schema, $parameter, $path);
+        $returnValue = $resolvedValue ?? $this->getValueForParameter($parameter->schema);
+
+        if (is_array($returnValue)) {
+            throw new InvalidParameterValueException(sprintf('Expected string or int but got: %s', gettype($returnValue)));
+        }
+
+        return $returnValue;
     }
 
     /**
@@ -649,36 +671,12 @@ class OpenApiHelper extends Module
      * for the defined type.
      *
      * @param \cebe\openapi\spec\Schema $schema
-     * @param \cebe\openapi\spec\Parameter $parameter
-     * @param string $path
      *
-     * @throws \Exception
-     *
-     * @return string|int
+     * @return array|string|int
      */
-    protected function getValueForParameter(Schema $schema, Parameter $parameter, string $path)
+    protected function getValueForParameter(Schema $schema)
     {
-        if ($schema->example) {
-            return $schema->example;
-        }
-
-        if ($schema->enum) {
-            // @TODO We should generate some mutations for this or at least randomly chose a value.
-            // ALl possible enums should be tested otherwise we can get randomly failing tests because one of the enums
-            // could be valid and another one not.
-            return $schema->enum[0];
-        }
-
-        $this->getOutput()->writeln(sprintf('Parameter <fg=yellow>%s</> for endpoint <fg=yellow>%s</> doesn\'t have an example or en enum defined. Try to guess one from the defined type <fg=yellow>%s</>.', $parameter->name, $path, $schema->type));
-
-        if ($schema->type === 'string') {
-            return 'asdftzuibin'; // @TODO replace with faker
-        }
-        if ($schema->type === 'int') {
-            return 12345; // @TODO replace with faker
-        }
-
-        throw new Exception(sprintf('Couldn\'t guess a value for type <fg=yellow>%s</>', $schema->type));
+        return (new ValueResolver())->getValueForSchema($schema);
     }
 
     /**
@@ -737,22 +735,17 @@ class OpenApiHelper extends Module
     }
 
     /**
-     * @param string $endpoint
+     * @param string $path
      * @param string $method
-     * @param array $headers
      *
      * @return \Psr\Http\Message\ServerRequestInterface
      */
-    protected function createRequest(string $endpoint, string $method, array $headers = []): ServerRequestInterface
+    protected function createRequest(string $path, string $method): ServerRequestInterface
     {
-        $request = (new Psr17Factory())->createServerRequest($method, $endpoint);
-
-        foreach ($headers as $headerName => $headerValue) {
-            $request = $request->withHeader($headerName, $headerValue);
-        }
+        $request = (new Psr17Factory())->createServerRequest($method, $path);
 
         // We need to manually add the query parameters to the request which is not done by the request factory automatically.
-        $parts = parse_url($endpoint);
+        $parts = parse_url($path);
 
         if (is_array($parts) && isset($parts['query'])) {
             parse_str($parts['query'], $query);
@@ -765,14 +758,41 @@ class OpenApiHelper extends Module
 
     /**
      * @param \Psr\Http\Message\ServerRequestInterface $request
+     * @param bool $requestValidationEnabled
+     *
+     * @throws \Spryker\Glue\TestifyOpenApi\Exception\ValidationFailedException
      *
      * @return \League\OpenAPIValidation\PSR7\OperationAddress
      */
-    protected function validateRequest(ServerRequestInterface $request): OperationAddress
+    protected function validateRequest(ServerRequestInterface $request, bool $requestValidationEnabled): OperationAddress
     {
+        if (!$requestValidationEnabled) {
+            return $this->getOperationAddress($request);
+        }
+
         $requestValidator = new ServerRequestValidator($this->getOpenApi());
 
-        return $requestValidator->validate($request);
+        try {
+            return $requestValidator->validate($request);
+        } catch (InvalidHeaders $invalidHeaders) {
+            throw new ValidationFailedException(sprintf('Headers seem to be missing. Exception: %s Passed headers: %s', $invalidHeaders->getMessage(), $this->implodeHeadersForException($request)), 0, $invalidHeaders);
+        }
+    }
+
+    /**
+     * @param \Psr\Http\Message\ServerRequestInterface $request
+     *
+     * @return string
+     */
+    protected function implodeHeadersForException(ServerRequestInterface $request): string
+    {
+        $headerStrings = [];
+
+        foreach ($request->getHeaders() as $headerName => $headerValues) {
+            $headerStrings[] = sprintf('%s: %s', $headerName, implode(', ', $headerValues));
+        }
+
+        return implode('; ', $headerStrings);
     }
 
     /**
@@ -790,13 +810,31 @@ class OpenApiHelper extends Module
     /**
      * @param \Psr\Http\Message\ResponseInterface $response
      * @param \League\OpenAPIValidation\PSR7\OperationAddress $operationAddress
+     * @param string $method
+     * @param string $path
+     * @param int $expectedResponseCode
+     *
+     * @throws \Spryker\Glue\TestifyOpenApi\Exception\ValidationFailedException
      *
      * @return void
      */
-    protected function validateResponse(ResponseInterface $response, OperationAddress $operationAddress): void
-    {
-        $requestValidator = new ResponseValidator($this->getOpenApi());
-        $requestValidator->validate($operationAddress, $response);
+    protected function validateResponse(
+        ResponseInterface $response,
+        OperationAddress $operationAddress,
+        string $method,
+        string $path,
+        int $expectedResponseCode
+    ): void {
+        try {
+            $requestValidator = new ResponseValidator($this->getOpenApi());
+            $requestValidator->validate($operationAddress, $response);
+        } catch (ValidationFailed $exception) {
+            $responseBody = PHP_EOL . PHP_EOL . (string)$response->getBody();
+
+            throw new ValidationFailedException(sprintf('Validation for [%s] %s with expected response code %s failed. %s%s', strtoupper($method), $path, $expectedResponseCode, $exception->getMessage(), $responseBody), 0, $exception);
+        }
+
+        Assert::assertSame($expectedResponseCode, $response->getStatusCode(), sprintf('[%s] %s returned a %s but expected response code is %s', $method, $path, $response->getStatusCode(), $expectedResponseCode));
     }
 
     /**
@@ -848,9 +886,25 @@ class OpenApiHelper extends Module
              */
             protected ApplicationInterface $innerApplication;
 
+            /**
+             * @var \Symfony\Component\HttpKernel\HttpKernelInterface
+             */
+            protected HttpKernelInterface $application;
+
             public function __construct()
             {
                 $this->innerApplication = (new GlueBootstrap())->boot();
+
+                $reflectionClass = new ReflectionClass($this->innerApplication);
+                $reflectionGlueApplicationBootstrapPluginProperty = $reflectionClass->getProperty('glueApplicationBootstrapPlugin');
+                $reflectionGlueApplicationBootstrapPluginProperty->setAccessible(true);
+
+                /** @var \Spryker\Glue\GlueApplicationExtension\Dependency\Plugin\GlueApplicationBootstrapPluginInterface $glueApplicationBootstrapPlugin */
+                $glueApplicationBootstrapPlugin = $reflectionGlueApplicationBootstrapPluginProperty->getValue($this->innerApplication);
+
+                /** @var \Symfony\Component\HttpKernel\HttpKernelInterface $application */
+                $application = $glueApplicationBootstrapPlugin->getApplication();
+                $this->application = $application;
             }
 
             /**
@@ -862,17 +916,7 @@ class OpenApiHelper extends Module
              */
             public function handle(Request $request, int $type = HttpKernelInterface::MAIN_REQUEST, bool $catch = true): Response
             {
-                $reflectionClass = new ReflectionClass($this->innerApplication);
-                $reflectionGlueApplicationBootstrapPluginProperty = $reflectionClass->getProperty('glueApplicationBootstrapPlugin');
-                $reflectionGlueApplicationBootstrapPluginProperty->setAccessible(true);
-
-                /** @var \Spryker\Glue\GlueApplicationExtension\Dependency\Plugin\GlueApplicationBootstrapPluginInterface $glueApplicationBootstrapPlugin */
-                $glueApplicationBootstrapPlugin = $reflectionGlueApplicationBootstrapPluginProperty->getValue($this->innerApplication);
-
-                /** @var \Symfony\Component\HttpKernel\HttpKernelInterface $application */
-                $application = $glueApplicationBootstrapPlugin->getApplication();
-
-                return $application->handle($request);
+                return $this->application->handle($request);
             }
         };
 
